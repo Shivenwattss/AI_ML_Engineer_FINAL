@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+data/*
+memory/*
+models/*
+generated_models/*
+.vscode/
+*.log
