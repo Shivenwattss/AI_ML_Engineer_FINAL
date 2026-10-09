@@ -1,2 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI ML Engineer FINAL</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:1000px;margin:35px auto;padding:20px}
+textarea,input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}
+button{font-weight:bold;cursor:pointer}
+.card{padding:18px;background:#f4f4f4;border-radius:10px;margin-top:15px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}
+#openGeneratedWebsite{display:none;background:#176b3a;color:white;border:0;border-radius:6px;padding:13px}
+</style>
+</head>
+<body>
+<h1>AI ML Engineer — FINAL</h1>
+<p>Give it a common tabular dataset and describe what you want to predict, cluster or detect.</p>
 
-<!doctype html><html><head><meta charset="utf-8"><title>AI ML Engineer FINAL</title><style>body{font-family:Arial;max-width:1000px;margin:35px auto;padding:20px}textarea,input,button{width:100%;padding:12px;margin:8px 0;box-sizing:border-box}button{font-weight:bold}.card{padding:18px;background:#f4f4f4;border-radius:10px;margin-top:15px}pre{white-space:pre-wrap}</style></head><body><h1>AI ML Engineer — FINAL</h1><p>Give it a common tabular dataset and describe what you want to predict, cluster or detect.</p><div class=card><form id=f><textarea name=problem rows=4 placeholder="Example: Predict whether a customer will churn." required></textarea><input name=target placeholder="Target column (optional)"><input name=file type=file accept=".csv,.xlsx,.xls,.json,.parquet" required><button>Build My Model</button></form><div id=o></div></div><div class=card><h2>Ask AI</h2><textarea id=q rows=3 placeholder="Why was this model selected?"></textarea><button onclick=ask()>Ask AI</button><pre id=a></pre></div><script>f.onsubmit=async e=>{e.preventDefault();o.textContent="Analyzing, training and evaluating...";try{let r=await fetch("/build",{method:"POST",body:new FormData(f)}),d=await r.json();if(!r.ok)throw Error(d.detail);o.innerHTML="<b>Done</b><br>Task: "+d.task+"<br>Target: "+(d.target||"None")+"<br>Selected: "+d.selected_model+"<h3>Results</h3><pre>"+JSON.stringify(d.results,null,2)+"</pre><h3>RAG memory</h3><pre>"+JSON.stringify(d.retrieved_memories,null,2)+"</pre><h3>Generated API</h3><pre>"+d.generated_api_path+"</pre>"}catch(x){o.textContent="Error: "+x.message}};async function ask(){let f=new FormData();f.append("message",q.value);let r=await fetch("/chat",{method:"POST",body:f}),d=await r.json();a.textContent=d.answer}</script></body></html>
+<div class="card">
+  <form id="buildForm">
+    <textarea name="problem" rows="4" placeholder="Example: Predict whether a customer will churn." required></textarea>
+    <input name="target" placeholder="Target column (optional)">
+    <input name="file" type="file" accept=".csv,.xlsx,.xls,.json,.parquet" required>
+    <button type="submit" id="buildButton">Build My Model</button>
+  </form>
+  <div id="output"></div>
+  <button id="openGeneratedWebsite" type="button">Open Generated Website</button>
+</div>
+
+<div class="card">
+  <h2>Ask AI</h2>
+  <textarea id="question" rows="3" placeholder="Why was this model selected?"></textarea>
+  <button id="askButton" type="button">Ask AI</button>
+  <pre id="answer"></pre>
+</div>
+
+<script>
+const buildForm = document.getElementById("buildForm");
+const output = document.getElementById("output");
+const buildButton = document.getElementById("buildButton");
+const openGeneratedWebsite = document.getElementById("openGeneratedWebsite");
+const question = document.getElementById("question");
+const answer = document.getElementById("answer");
+
+let generatedWebsiteUrl = "";
+
+buildForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  output.textContent = "Analyzing, training and evaluating...";
+  openGeneratedWebsite.style.display = "none";
+  generatedWebsiteUrl = "";
+  buildButton.disabled = true;
+
+  try {
+    const response = await fetch("/build", {
+      method: "POST",
+      body: new FormData(buildForm)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Model build failed.");
+
+    output.replaceChildren();
+
+    const done = document.createElement("b");
+    done.textContent = "Done";
+    output.appendChild(done);
+
+    for (const line of [
+      `Task: ${data.task}`,
+      `Target: ${data.target || "None"}`,
+      `Selected: ${data.selected_model}`
+    ]) {
+      const p = document.createElement("p");
+      p.textContent = line;
+      output.appendChild(p);
+    }
+
+    function addJsonSection(title, value) {
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(value, null, 2);
+      output.append(heading, pre);
+    }
+
+    addJsonSection("Results", data.results);
+    addJsonSection("RAG memory", data.retrieved_memories);
+
+    const apiHeading = document.createElement("h3");
+    apiHeading.textContent = "Generated API";
+    const apiPath = document.createElement("pre");
+    apiPath.textContent = data.generated_api_path || data.generated_api_url || "";
+    output.append(apiHeading, apiPath);
+
+    if (data.generated_website_url) {
+      generatedWebsiteUrl = new URL(data.generated_website_url, window.location.origin).href;
+      openGeneratedWebsite.style.display = "block";
+    }
+  } catch (error) {
+    output.textContent = "Error: " + error.message;
+  } finally {
+    buildButton.disabled = false;
+  }
+});
+
+openGeneratedWebsite.addEventListener("click", () => {
+  if (generatedWebsiteUrl) window.open(generatedWebsiteUrl, "_blank", "noopener");
+});
+
+document.getElementById("askButton").addEventListener("click", async () => {
+  answer.textContent = "Thinking...";
+  try {
+    const formData = new FormData();
+    formData.append("message", question.value);
+    const response = await fetch("/chat", { method: "POST", body: formData });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Chat request failed.");
+    answer.textContent = data.answer || JSON.stringify(data);
+  } catch (error) {
+    answer.textContent = "Error: " + error.message;
+  }
+});
+</script>
+</body>
+</html>
