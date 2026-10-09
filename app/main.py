@@ -8,7 +8,7 @@ import subprocess
 import webbrowser
 import threading
 import time
-
+import uuid
 import pandas as pd
 
 try:
