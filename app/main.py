@@ -1,120 +1,96 @@
-            "model_id": model_id,
-            "generated_website_url": f"/models/{model_id}",
-            "generated_api_url": f"/api/models/{model_id}/predict",
-            "generated_api_docs": "/docs"
-        }
+from pathlib import Path
+import re
+import json
+import shutil
+import os
+import sys
+import subprocess
+import webbrowser
+import threading
+import time
+import uuid
+import pandas as pd
 
-    except Exception as e:
+try:
+    import requests  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - handled gracefully at runtime
+    requests = None
 
-        raise HTTPException(
-            400,
-            str(e)
-        )
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.memory import retrieve, save_experiment, load
+from app.llm_agent import plan
+from app.ml.engine import build
 
 
-# ============================================================
-# RAG MEMORY
-# ============================================================
+app = FastAPI(title="AI ML Engineer FINAL")
 
-@app.get("/memory")
-def memory():
 
+# Store generated models separately by ID.
+# Models are loaded from their saved folders when requested.
+
+def get_generated_model(model_id: str):
+    import joblib
+
+    # Only allow simple IDs, not paths
+    if not re.fullmatch(r"[a-f0-9]{8}", model_id):
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    model_dir = Path("generated_models") / model_id
+    model_file = model_dir / "model.joblib"
+    metadata_file = model_dir / "metadata.json"
+
+    if not model_file.exists() or not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    bundle = joblib.load(model_file)
+    metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+
+    return bundle, metadata
+
+
+@app.get("/models/{model_id}")
+def generated_model_page(model_id: str):
+    if not re.fullmatch(r"[a-f0-9]{8}", model_id):
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    page = Path("generated_models") / model_id / "index.html"
+    if not page.exists():
+        raise HTTPException(status_code=404, detail="Model page not found")
+
+    return FileResponse(page)
+
+
+@app.get("/api/models/{model_id}")
+def generated_model_info(model_id: str):
+    bundle, metadata = get_generated_model(model_id)
     return {
-        "experiments": load()
+        "model_id": model_id,
+        "model": metadata["model"],
+        "task": metadata["task"],
+        "target": metadata["target"],
+        "features": metadata["features"],
+        "feature_types": metadata["feature_types"],
+        "docs_url": "/docs"
     }
 
 
-# ============================================================
-# AI CHAT USING OLLAMA
-# ============================================================
-
-
-@app.post("/chat")
-async def chat(message: str = Form(...)):
-    import os
+@app.post("/api/models/{model_id}/predict")
+async def generated_model_predict(model_id: str, payload: dict):
     import joblib
+    import pandas as pd
 
-    info = {}
+    bundle, metadata = get_generated_model(model_id)
+    pipeline = bundle["pipeline"]
+    features = metadata["features"]
 
-    # Get information about the current trained model
-    if Path("models/best_model.joblib").exists():
-        b = joblib.load("models/best_model.joblib")
-        info = {
-            "task": b.get("task"),
-            "target": b.get("target"),
-            "features": b.get("features", [])
-        }
-
-    try:
-        api_key = os.getenv("OLLAMA_API_KEY")
-
-        if not api_key:
-            return {
-                "answer": "Ollama Cloud is not configured. Check OLLAMA_API_KEY in Render Environment.",
-                "llm_connected": False
-            }
-
-        # Prepare the chat prompt
-        p = f"""
-You are the AI ML Engineer assistant.
-
-Current trained model:
-{json.dumps(info, default=str)}
-
-Previous experiments:
-{json.dumps(load()[-5:], default=str)}
-
-User question:
-{message}
-
-Answer clearly and only use information available in the context.
-"""
-
-        # Send the request to Ollama Cloud
-        r = requests.post(
-            "https://ollama.com/api/chat",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": os.getenv("OLLAMA_CLOUD_MODEL", "gemma4:31b"),
-                "messages": [
-                    {"role": "user", "content": p}
-                ],
-                "stream": False
-            },
-            timeout=(10, 120)
+    missing = [feature for feature in features if feature not in payload]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required features: {missing}"
         )
 
-        r.raise_for_status()
-        data = r.json()
-        answer = data["message"]["content"]
-
-        return {
-            "answer": answer,
-            "llm_connected": True,
-            "llm": "Ollama Cloud"
-        }
-
-    except requests.RequestException as e:
-        return {
-            "answer": (
-                "Could not connect to Ollama Cloud. "
-                f"Error: {str(e)[:300]}"
-            ),
-            "llm_connected": False
-        }
-
-    except (ValueError, KeyError, TypeError) as e:
-        return {
-            "answer": f"Unexpected Ollama response: {str(e)[:300]}",
-            "llm_connected": False
-        }
-
-    except Exception as e:
-        return {
-            "answer": f"Chat error: {type(e).__name__}: {str(e)[:300]}",
-            "llm_connected": False
-        }
-
+    try:
